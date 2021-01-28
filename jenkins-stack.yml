@@ -6,7 +6,7 @@ Parameters:
     Description: Image ID for base EC2 instance.
     Type: AWS::EC2::Image::Id
     # arn:aws:ssm:us-east-1::parameter/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
-    Default: ami-0323c3dd2da7fb37d
+    Default: ami-01aab85a5e4a5a0fe
   InstanceType:
     Description: Instance type to launch EC2 instances.
     Type: String
@@ -28,9 +28,9 @@ Resources:
       GroupDescription: Enable HTTP access via user defined port
       SecurityGroupIngress:
       - CidrIp: 0.0.0.0/0
-        FromPort: 80
+        FromPort: 8080
         IpProtocol: tcp
-        ToPort: 80
+        ToPort: 8080
   Instance:
     Type: AWS::EC2::Instance
     Properties:
@@ -43,35 +43,36 @@ Resources:
         "Fn::Base64": !Sub |
           #!/bin/bash -x
           yum update -y
-          touch /home/ec2-user/install.log
-          echo "Installing java-1.8.0-openjdk: " >> /home/ec2-user/install.log
-          yum install java-1.8.0-openjdk -y >> /home/ec2-user/install.log
-          echo "END Java Installation" >> /home/ec2-user/install.log
-          echo "=====================" >> /home/ec2-user/install.log
-          echo "" >> /home/ec2-user/install.log
+          touch /var/log/install.log
+          echo "Installing java-1.8.0-openjdk: " >> /var/log/install.log
+          yum install java-1.8.0-openjdk -y >> /var/log/install.log
+          echo "END Java Installation" >> /var/log/install.log
+          echo "=====================" >> /var/log/install.log
+          echo "" >> /var/log/install.log
 
-          echo "Installing Jenkins" >> /home/ec2-user/install.log
-          wget -O /etc/yum.repos.d/jenkins.repo http://pkg.jenkins-ci.org/redhat/jenkins.repo >> /home/ec2-user/install.log
-          #rpm --import https://jenkins-ci.org/redhat/jenkins-ci.org.key >> /home/ec2-user/install.log
-          rpm --import https://pkg.jenkins.io/redhat/jenkins.io.key >> /home/ec2-user/install.log
-          yum install jenkins-2.231-1.1 -y >> /home/ec2-user/install.log
-          systemctl start jenkins.service >> /home/ec2-user/install.log
-          systemctl enable jenkins.service >> /home/ec2-user/install.log
-          echo "END Jenkins Installation" >> /home/ec2-user/install.log
-          echo "=====================" >> /home/ec2-user/install.log
-          echo "" >> /home/ec2-user/install.log
+          echo "Installing Jenkins" >> /var/log/install.log
+          wget -O /etc/yum.repos.d/jenkins.repo http://pkg.jenkins-ci.org/redhat/jenkins.repo >> /var/log/install.log
+          #rpm --import https://jenkins-ci.org/redhat/jenkins-ci.org.key >> /var/log/install.log
+          rpm --import https://pkg.jenkins.io/redhat/jenkins.io.key >> /var/log/install.log
+          yum install jenkins-2.231-1.1 -y >> /var/log/install.log
+          systemctl start jenkins.service >> /var/log/install.log
+          systemctl enable jenkins.service >> /var/log/install.log
+          echo "END Jenkins Installation" >> /var/log/install.log
+          echo "=====================" >> /var/log/install.log
+          echo "" >> /var/log/install.log
 
           yum install git -y     && \
           yum install maven -y   && \
-          yum install python -y  && \
-          pip3 install boto3     
+          yum install python3 -y  && \
+          pip3 install boto3 --user 
           
           #aws s3 cp s3://student-cloudformation-template/jenkins-upload.py /tmp/
-          git clone
+          git clone https://github.com/53555/Cloudformation-ManagementStack.git /tmp/CFM/ && \
+          python3 /tmp/CFM/jenkins-upload.py >> /var/log/install.log
 
-          python3 /tmp/jenkins-upload.py
+          systemctl restart jenkins.service >> /var/log/install.log
 
-          #iptables -A PREROUTING -t nat -i eth0 -p tcp --dport 80 -j REDIRECT --to-port 8080 >> /home/ec2-user/install.log
+          #iptables -A PREROUTING -t nat -i eth0 -p tcp --dport 80 -j REDIRECT --to-port 8080 >> /var/log/install.log
           #iptables-save > /etc/iptables.conf
           #echo "iptables-restore < /etc/iptables.conf" >> /etc/rc.local
           #chmod +x /etc/rc.d/rc.local
@@ -81,7 +82,7 @@ Resources:
           #  --stack ${AWS::StackName} \
           #  --region ${AWS::Region} \
           #  --resource AMICreate
-          chown ec2-user:ec2-user /home/ec2-user/install.log
+          chown ec2-user:ec2-user /var/log/install.log
       KeyName: "appstack"
       Tags:
         -
