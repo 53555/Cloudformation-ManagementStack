@@ -18,8 +18,7 @@ try:
     upload = sp.check_output(copy_cmd, shell=True)
     print("Upload to /tmp dir successfully")
     with tarfile.open("/tmp/"+backup_file) as TARGZ:
-        TARGZ.extractall(path=Jenkins_home,
-                         arcname=os.path.basename(Jenkins_home))
+        TARGZ.extractall(path=Jenkins_home)
         TARGZ.close()
     print("Upload completed successfully")
 except Exception as e:
