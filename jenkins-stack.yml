@@ -7,6 +7,11 @@ Parameters:
     Type: AWS::EC2::Image::Id
     # arn:aws:ssm:us-east-1::parameter/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
     Default: ami-01aab85a5e4a5a0fe
+  LdapImageId:
+    Description: Image ID for base EC2 instance.
+    Type: AWS::EC2::Image::Id
+    # arn:aws:ssm:us-east-1::parameter/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+    Default: ami-0b4db8652bbeadef4
   InstanceType:
     Description: Instance type to launch EC2 instances.
     Type: String
@@ -31,21 +36,69 @@ Resources:
         FromPort: 8080
         IpProtocol: tcp
         ToPort: 8080
-  Instance:
+  LdapSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable HTTP access via user defined port
+      SecurityGroupIngress:
+      - CidrIp: 0.0.0.0/0
+        FromPort: 80
+        IpProtocol: tcp
+        ToPort: 80
+      - IpProtocol: tcp
+        FromPort: 389
+        ToPort: 389
+        SourceSecurityGroupId: 
+          Fn::GetAtt:
+            - WebSecurityGroup
+            - GroupId
+  JenkinsAdminRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: "/"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement: 
+          - 
+            Effect: "Allow"
+            Principal: 
+              Service: 
+                - "ec2.amazonaws.com"
+            Action: 
+              - "sts:AssumeRole"
+      Policies:
+        - 
+          PolicyName: "root"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - 
+                Effect: "Allow"
+                Action: "*"
+                Resource: "*"
+  JenkinsInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: JenkinsInstanceProfile
+      Path: /
+      Roles:
+        - !Ref JenkinsAdminRole
+  JenkinsInstance:
     Type: AWS::EC2::Instance
     Properties:
       ImageId: !Ref ImageId
       InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref JenkinsInstanceProfile
       SecurityGroups:
       - !Ref SSHSecurityGroup
       - !Ref WebSecurityGroup
       UserData:
         "Fn::Base64": !Sub |
           #!/bin/bash -x
-          yum update -y
+          yum update -y && \
           touch /var/log/install.log
           echo "Installing java-1.8.0-openjdk: " >> /var/log/install.log
-          yum install java-1.8.0-openjdk -y >> /var/log/install.log
+          yum install java-1.8.0-openjdk -y >> /var/log/install.log && \
           echo "END Java Installation" >> /var/log/install.log
           echo "=====================" >> /var/log/install.log
           echo "" >> /var/log/install.log
@@ -54,20 +107,20 @@ Resources:
           wget -O /etc/yum.repos.d/jenkins.repo http://pkg.jenkins-ci.org/redhat/jenkins.repo >> /var/log/install.log
           #rpm --import https://jenkins-ci.org/redhat/jenkins-ci.org.key >> /var/log/install.log
           rpm --import https://pkg.jenkins.io/redhat/jenkins.io.key >> /var/log/install.log
-          yum install jenkins-2.231-1.1 -y >> /var/log/install.log
+          yum install jenkins -y >> /var/log/install.log && \
           systemctl start jenkins.service >> /var/log/install.log
           systemctl enable jenkins.service >> /var/log/install.log
           echo "END Jenkins Installation" >> /var/log/install.log
           echo "=====================" >> /var/log/install.log
           echo "" >> /var/log/install.log
 
-          yum install git -y     && \
-          yum install maven -y   && \
-          yum install python3 -y  && \
-          pip3 install boto3 --user 
+          yum install git -y    >> /var/log/install.log
+          yum install maven -y   >> /var/log/install.log
+          yum install python3 -y  >> /var/log/install.log
+          pip3 install boto3 --user  >> /var/log/install.log
           
           #aws s3 cp s3://student-cloudformation-template/jenkins-upload.py /tmp/
-          git clone https://github.com/53555/Cloudformation-ManagementStack.git /tmp/CFM/ && \
+          git clone https://github.com/53555/Cloudformation-ManagementStack.git /tmp/CFM/ >> /var/log/install.log
           python3 /tmp/CFM/jenkins-upload.py >> /var/log/install.log
 
           systemctl restart jenkins.service >> /var/log/install.log
@@ -83,8 +136,53 @@ Resources:
           #  --region ${AWS::Region} \
           #  --resource AMICreate
           chown ec2-user:ec2-user /var/log/install.log
+          echo "0 12 * * * /usr/bin/python3 /var/lib/jenkins/jenkins-bakup.py" | crontab -
+          
+          IP=$(curl http://169.254.169.254/latest/meta-data/public-ipv4)
+          aws route53 change-resource-record-sets --hosted-zone-id Z1979XAS933KHZ --change-batch '{
+            "Comment": "UPSERT a record ",
+            "Changes": [{
+            "Action": "UPSERT",
+                        "ResourceRecordSet": {
+                                    "Name": "jenkins.prodops-fico.com",
+                                    "Type": "A",
+                                    "TTL": 300,
+                                 "ResourceRecords": [{ "Value": "'"$IP"'"}]
+          }}]
+          }'
       KeyName: "appstack"
       Tags:
         -
           Key: Name
           Value: Jenkins-Server
+
+  LdapInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LdapImageId
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref JenkinsInstanceProfile
+      SecurityGroups:
+      - !Ref SSHSecurityGroup
+      - !Ref LdapSecurityGroup
+      UserData:
+        "Fn::Base64": !Sub |
+          #!/bin/bash -x
+          IP=$(curl http://169.254.169.254/latest/meta-data/local-ipv4)
+          aws route53 change-resource-record-sets --hosted-zone-id Z1979XAS933KHZ --change-batch '{
+            "Comment": "UPSERT a record ",
+            "Changes": [{
+            "Action": "UPSERT",
+                        "ResourceRecordSet": {
+                                    "Name": "ldap.prodops-fico.com",
+                                    "Type": "A",
+                                    "TTL": 300,
+                                 "ResourceRecords": [{ "Value": "'"$IP"'"}]
+          }}]
+          }'
+
+      KeyName: "appstack"
+      Tags:
+        -
+          Key: Name
+          Value: Ldap-Server
