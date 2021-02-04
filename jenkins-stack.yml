@@ -127,6 +127,7 @@ Resources:
       UserData:
         "Fn::Base64": !Sub |
           #!/bin/bash -x
+          echo "jenkins ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers.d/90-cloud-init-users
           yum update -y && \
           touch /var/log/install.log
           echo "Installing java-1.8.0-openjdk: " >> /var/log/install.log
@@ -149,7 +150,9 @@ Resources:
           yum install git -y    >> /var/log/install.log
           yum install maven -y   >> /var/log/install.log
           yum install python3 -y  >> /var/log/install.log
+          yum install python-pip python3-wheel -y >> /var/log/install.log
           pip3 install boto3 --user  >> /var/log/install.log
+          pip3 install botocore --user  >> /var/log/install.log
           
           #aws s3 cp s3://student-cloudformation-template/jenkins-upload.py /tmp/
           git clone https://github.com/53555/Cloudformation-ManagementStack.git /tmp/CFM/ >> /var/log/install.log
