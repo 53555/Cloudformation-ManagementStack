@@ -23,6 +23,7 @@ try:
     print("Upload completed successfully")
 except Exception as e:
     print("upload failed \n" + e)
+    print("upload failed bad")
 
 
 
