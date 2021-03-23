@@ -1,0 +1,215 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: Create an AMI from an EC2 instance.
+Parameters:
+  CImageId:
+    Description: Image ID for Ansible Controller EC2 instance.
+    Type: AWS::EC2::Image::Id
+    # arn:aws:ssm:us-east-1::parameter/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+    Default: ami-01aab85a5e4a5a0fe
+  ALImageId:
+    Description: Image ID for base EC2 Amazon instance.
+    Type: AWS::EC2::Image::Id
+    # arn:aws:ssm:us-east-1::parameter/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+    Default: ami-01aab85a5e4a5a0fe
+  ULImageId:
+    Description: Image ID for base EC2 Ubuntu instance.
+    Type: AWS::EC2::Image::Id
+    # arn:aws:ssm:us-east-1::parameter/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+    Default: ami-0ade3e6d496de298f
+  InstanceType:
+    Description: Instance type to launch EC2 instances.
+    Type: String
+    Default: t2.micro
+    AllowedValues: [ t2.micro, t2.nano ]
+Resources:
+  SSHSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable SSH access via port 22
+      SecurityGroupIngress:
+      - CidrIp: 0.0.0.0/0
+        FromPort: 22
+        IpProtocol: tcp
+        ToPort: 22
+  WebSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable HTTP access via user defined port
+      SecurityGroupIngress:
+      - CidrIp: 0.0.0.0/0
+        FromPort: 8080
+        IpProtocol: tcp
+        ToPort: 8080
+      - CidrIp: 0.0.0.0/0
+        FromPort: 80
+        IpProtocol: tcp
+        ToPort: 80
+
+  AnsibleAdminRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: "/"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement: 
+          - 
+            Effect: "Allow"
+            Principal: 
+              Service: 
+                - "ec2.amazonaws.com"
+            Action: 
+              - "sts:AssumeRole"
+      Policies:
+        - 
+          PolicyName: "root"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - 
+                Effect: "Allow"
+                Action: "*"
+                Resource: "*"
+  AnsibleInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: JenkinsInstanceProfile
+      Path: /
+      Roles:
+        - !Ref JenkinsAdminRole
+        
+  AmasonLinuxInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref ALImageId
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref AnsibleInstanceProfile
+      SecurityGroups:
+      - !Ref SSHSecurityGroup
+      - !Ref WebSecurityGroup
+      UserData:
+        "Fn::Base64": !Sub |
+          #!/bin/bash -x
+          # create user
+          useradd -m -d /home/ansible ansible
+          #set the password for ansible user
+          echo "ansible" | passwd ansible --stdin
+
+          #adding user into Sudoer
+          echo "ansible ALL=(ALL) NOPASSWD:ALL"  >> /etc/sudoers.d/90-cloud-init-users
+
+          #enable Password auth
+          sed -i 's/^PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
+
+          yum install python python-pip -y 
+          IP=$(curl http://169.254.169.254/latest/meta-data/local-ipv4)
+          aws route53 change-resource-record-sets --hosted-zone-id Z1979XAS933KHZ --change-batch '{
+            "Comment": "UPSERT a record ",
+            "Changes": [{
+            "Action": "UPSERT",
+                        "ResourceRecordSet": {
+                                    "Name": "alnode.prodops-fico.com",
+                                    "Type": "A",
+                                    "TTL": 300,
+                                 "ResourceRecords": [{ "Value": "'"$IP"'"}]
+          }}]
+          }'
+          systemctl restart sshd.service
+      KeyName: "ansible"
+      Tags:
+        -
+          Key: Name
+          Value: Ansible-AmasonLinuxInstance
+  
+  UbuntuLinuxInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref ULImageId
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref AnsibleInstanceProfile
+      SecurityGroups:
+      - !Ref SSHSecurityGroup
+      - !Ref WebSecurityGroup
+      UserData:
+        "Fn::Base64": !Sub |
+          #!/bin/bash -x
+          # create user
+          useradd -m -d /home/ansible ansible
+          #set the password for ansible user
+          echo "ansible" | passwd ansible --stdin
+
+          #adding user into Sudoer
+          echo "ansible ALL=(ALL) NOPASSWD:ALL"  >> /etc/sudoers.d/90-cloud-init-users
+
+          #enable Password auth
+          sed -i 's/^PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
+
+          IP=$(curl http://169.254.169.254/latest/meta-data/local-ipv4)
+          aws route53 change-resource-record-sets --hosted-zone-id Z1979XAS933KHZ --change-batch '{
+            "Comment": "UPSERT a record ",
+            "Changes": [{
+            "Action": "UPSERT",
+                        "ResourceRecordSet": {
+                                    "Name": "ulnode.prodops-fico.com",
+                                    "Type": "A",
+                                    "TTL": 300,
+                                 "ResourceRecords": [{ "Value": "'"$IP"'"}]
+          }}]
+          }'
+          systemctl restart sshd.service
+      KeyName: "ansible"
+      Tags:
+        -
+          Key: Name
+          Value: Ansible-UbuntuLinuxInstance
+
+  AnsibleInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref CImageId
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref JenkinsInstanceProfile
+      SecurityGroups:
+      - !Ref SSHSecurityGroup
+      - !Ref WebSecurityGroup
+      UserData:
+        "Fn::Base64": !Sub |
+          #!/bin/bash -x
+          # create user
+          useradd -m -d /home/ansible ansible
+          #set the password for ansible user
+          echo "ansible" | passwd ansible --stdin
+
+          #adding user into Sudoer
+          echo "ansible ALL=(ALL) NOPASSWD:ALL"  >> /etc/sudoers.d/90-cloud-init-users
+
+          #enable Password auth
+          sed -i 's/^PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
+
+          
+          yum install python python-pip -y && \
+          RPM=epel-release-latest-7.noarch.rpm
+          wget http://dl.fedoraproject.org/pub/epel/$RPM -P /tmp/ && \
+          rpm -ivh $RPM
+          yum update -y && \
+          touch /var/log/install.log
+          yum --enablerepo=epel install ansible >> /var/log/install.log
+          IP=$(curl http://169.254.169.254/latest/meta-data/public-ipv4)
+          aws route53 change-resource-record-sets --hosted-zone-id Z1979XAS933KHZ --change-batch '{
+            "Comment": "UPSERT a record ",
+            "Changes": [{
+            "Action": "UPSERT",
+                        "ResourceRecordSet": {
+                                    "Name": "ansible.prodops-fico.com",
+                                    "Type": "A",
+                                    "TTL": 300,
+                                 "ResourceRecords": [{ "Value": "'"$IP"'"}]
+          }}]
+          }'
+          systemctl restart sshd.service
+      KeyName: "ansible"
+      Tags:
+        -
+          Key: Name
+          Value: AnsibleControl-Server
+
